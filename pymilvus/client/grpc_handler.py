@@ -165,7 +165,6 @@ class RegistryHandler:
                      ('grpc.enable_retries', 1),
                      ('grpc.keepalive_time_ms', 55000)]
         )
-        # self._stub = milvus_pb2_grpc.MilvusServiceStub(self._channel)
         self._stub = milvus_pb2_grpc.ProxyServiceStub(self._channel)
         self.status = Status()
 
@@ -1112,6 +1111,12 @@ class GrpcHandler(AbsMilvus):
         request = Prepare.register_link_request()
         future = self._stub.RegisterLink.future(request, wait_for_ready=True, timeout=timeout)
         return future.result().status
+
+    @error_handler(DeployMode.Distributed)
+    def get_deploy_mode(self, timeout=None):
+        request = Prepare.register_link_request()
+        future = self._stub.RegisterLink.future(request, wait_for_ready=True, timeout=timeout)
+        return future.result().status.reason
 
     @error_handler()
     def get(self, collection_name, ids, output_fields=None, partition_names=None, timeout=None):

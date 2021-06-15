@@ -5,6 +5,7 @@ import functools
 import logging
 import time
 
+import grpc
 from urllib.parse import urlparse
 
 from . import __version__
@@ -19,6 +20,7 @@ from .utils import valid_index_types
 from .utils import valid_binary_index_types
 from .utils import valid_index_params_keys
 from .utils import check_invalid_binary_vector
+from .connections import Connections
 
 LOGGER = logging.getLogger(__name__)
 
@@ -39,6 +41,33 @@ def check_connect(func):
         return func(self, *args, **kwargs)
 
     return inner
+
+
+def retry_on_rpc_failure(retry_times=3):
+    def wrapper(func):
+        @functools.wraps(func)
+        def handler(self, *args, **kwargs):
+            wait = 1
+            counter = 1
+            while True:
+                try:
+                    return func(self, *args, **kwargs)
+                except grpc.RpcError as e:
+                    if e.code() == grpc.StatusCode.DEADLINE_EXCEEDED or e.code() == grpc.StatusCode.UNAVAILABLE:
+                        if counter < retry_times:
+                            time.sleep(wait)
+                            wait *= 2
+                            pass
+                        raise e
+                    raise e
+                except Exception as e:
+                    raise e
+                finally:
+                    counter += 1
+
+        return handler
+
+    return wrapper
 
 
 def _pool_args(**kwargs):
@@ -88,43 +117,18 @@ class Milvus:
             raise NotImplementedError("only grpc handler is supported now!")
 
         _uri = kwargs.get('uri', None)
-        pool_uri = _set_uri(host, port, _uri, self._handler)
-        pool_kwargs = _pool_args(handler=handler, **kwargs)
-        # self._pool = SingleConnectionPool(pool_uri, **pool_kwargs)
-        if pool == "QueuePool":
-            self._pool = ConnectionPool(pool_uri, **pool_kwargs)
-        elif pool == "SingletonThread":
-            self._pool = SingletonThreadPool(pool_uri, **pool_kwargs)
-        elif pool == "Singleton":
-            self._pool = SingleConnectionPool(pool_uri, **pool_kwargs)
-        else:
-            raise ParamError("Unknown pool value: {}".format(pool))
+        uri = _set_uri(host, port, _uri, self._handler)
+        _conn_update_policy = kwargs.get("update_policy", "lazy")
+        self._connections_ins = Connections(uri, _conn_update_policy)
 
         # store extra key-words arguments
         self._kw = kwargs
         self._hooks = collections.defaultdict()
 
         self._deploy_mode = DeployMode.Distributed
-        self._wait_for_healthy()
-
-    @check_connect
-    def _wait_for_healthy(self, timeout=300, retry=250):
-        with self._connection() as handler:
-            while retry > 0:
-                try:
-                    status = handler.fake_register_link(timeout)
-                    if status.error_code == 0:
-                        self._deploy_mode = status.reason
-                        return
-                except:
-                    pass
-                finally:
-                    time.sleep(1)
-                    retry -= 1
-            raise Exception("server is not healthy, please try again later")
 
     def __enter__(self):
-        self._conn = self._pool.fetch()
+        self._conn = self._connections_ins.fetch()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -132,10 +136,10 @@ class Milvus:
         self._conn = None
 
     def __del__(self):
-        self._pool = None
+        self._connections_ins = None
 
     def _connection(self):
-        return self._pool.fetch()
+        return self._connections_ins.fetch()
 
     @property
     def name(self):
@@ -149,11 +153,12 @@ class Milvus:
         """
         Close client instance
         """
-        if self._pool:
-            self._pool = None
+        if self._connections_ins:
+            self._connections_ins = None
             return
         raise Exception("connection was already closed!")
 
+    @retry_on_rpc_failure(retry_times=3)
     @check_connect
     def create_collection(self, collection_name, fields, timeout=None, **kwargs):
         """
@@ -190,6 +195,7 @@ class Milvus:
         with self._connection() as handler:
             return handler.create_collection(collection_name, fields, timeout, **kwargs)
 
+    @retry_on_rpc_failure(retry_times=3)
     @check_connect
     def drop_collection(self, collection_name, timeout=None):
         """
@@ -214,6 +220,7 @@ class Milvus:
         with self._connection() as handler:
             return handler.drop_collection(collection_name, timeout)
 
+    @retry_on_rpc_failure(retry_times=3)
     @check_connect
     def has_collection(self, collection_name, timeout=None):
         """
@@ -238,6 +245,7 @@ class Milvus:
         with self._connection() as handler:
             return handler.has_collection(collection_name, timeout)
 
+    @retry_on_rpc_failure(retry_times=3)
     @check_connect
     def describe_collection(self, collection_name, timeout=None):
         """
@@ -266,6 +274,7 @@ class Milvus:
         with self._connection() as handler:
             return handler.describe_collection(collection_name, timeout)
 
+    @retry_on_rpc_failure(retry_times=3)
     @check_connect
     def load_collection(self, collection_name, timeout=None):
         """
@@ -290,6 +299,7 @@ class Milvus:
         with self._connection() as handler:
             return handler.load_collection("", collection_name=collection_name, timeout=timeout)
 
+    @retry_on_rpc_failure(retry_times=3)
     @check_connect
     def release_collection(self, collection_name, timeout=None):
         """
@@ -314,6 +324,7 @@ class Milvus:
         with self._connection() as handler:
             return handler.release_collection(db_name="", collection_name=collection_name, timeout=timeout)
 
+    @retry_on_rpc_failure(retry_times=3)
     @check_connect
     def get_collection_stats(self, collection_name, timeout=None, **kwargs):
         """
@@ -341,6 +352,7 @@ class Milvus:
             result["row_count"] = int(result["row_count"])
             return result
 
+    @retry_on_rpc_failure(retry_times=3)
     @check_connect
     def list_collections(self, timeout=None):
         """
@@ -361,6 +373,7 @@ class Milvus:
         with self._connection() as handler:
             return handler.list_collections(timeout)
 
+    @retry_on_rpc_failure(retry_times=3)
     @check_connect
     def create_partition(self, collection_name, partition_name, timeout=None):
         """
@@ -390,6 +403,7 @@ class Milvus:
         with self._connection() as handler:
             return handler.create_partition(collection_name, partition_name, timeout)
 
+    @retry_on_rpc_failure(retry_times=3)
     @check_connect
     def drop_partition(self, collection_name, partition_name, timeout=None):
         """
@@ -419,6 +433,7 @@ class Milvus:
         with self._connection() as handler:
             return handler.drop_partition(collection_name, partition_name, timeout)
 
+    @retry_on_rpc_failure(retry_times=3)
     @check_connect
     def has_partition(self, collection_name, partition_name, timeout=None):
         """
@@ -446,6 +461,7 @@ class Milvus:
         with self._connection() as handler:
             return handler.has_partition(collection_name, partition_name, timeout)
 
+    @retry_on_rpc_failure(retry_times=3)
     @check_connect
     def load_partitions(self, collection_name, partition_names, timeout=None):
         """
@@ -474,6 +490,7 @@ class Milvus:
             return handler.load_partitions(db_name="", collection_name=collection_name,
                                            partition_names=partition_names, timeout=timeout)
 
+    @retry_on_rpc_failure(retry_times=3)
     @check_connect
     def release_partitions(self, collection_name, partition_names, timeout=None):
         """
@@ -502,6 +519,7 @@ class Milvus:
             return handler.release_partitions(db_name="", collection_name=collection_name,
                                               partition_names=partition_names, timeout=timeout)
 
+    @retry_on_rpc_failure(retry_times=3)
     @check_connect
     def list_partitions(self, collection_name, timeout=None):
         """
@@ -527,6 +545,7 @@ class Milvus:
         with self._connection() as handler:
             return handler.list_partitions(collection_name, timeout)
 
+    @retry_on_rpc_failure(retry_times=3)
     @check_connect
     def get_partition_stats(self, collection_name, partition_name, timeout=None, **kwargs):
         """
@@ -590,6 +609,7 @@ class Milvus:
     #     with self._connection() as handler:
     #         return handler.insert(collection_name, entities, ids, partition_name, params, timeout, **kwargs)
 
+    @retry_on_rpc_failure(retry_times=3)
     @check_connect
     def create_index(self, collection_name, field_name, params, timeout=None, **kwargs):
         """
@@ -727,6 +747,7 @@ class Milvus:
         with self._connection() as handler:
             return handler.create_index(collection_name, field_name, params, timeout, **kwargs)
 
+    @retry_on_rpc_failure(retry_times=3)
     @check_connect
     def drop_index(self, collection_name, field_name, timeout=None):
         """
@@ -756,6 +777,7 @@ class Milvus:
             return handler.drop_index(collection_name=collection_name,
                                       field_name=field_name, index_name="_default_idx", timeout=timeout)
 
+    @retry_on_rpc_failure(retry_times=3)
     @check_connect
     def describe_index(self, collection_name, index_name="", timeout=None):
         """
@@ -784,6 +806,7 @@ class Milvus:
         with self._connection() as handler:
             return handler.describe_index(collection_name, index_name, timeout)
 
+    @retry_on_rpc_failure(retry_times=3)
     @check_connect
     def insert(self, collection_name, entities, ids=None, partition_name=None, timeout=None, **kwargs):
         """
@@ -835,6 +858,7 @@ class Milvus:
         with self._connection() as handler:
             return handler.bulk_insert(collection_name, entities, ids, partition_name, None, timeout, **kwargs)
 
+    @retry_on_rpc_failure(retry_times=3)
     @check_connect
     def flush(self, collection_names=None, timeout=None, **kwargs):
         """
@@ -883,6 +907,7 @@ class Milvus:
         with self._connection() as handler:
             return handler.flush(collection_names, timeout, **kwargs)
 
+    @retry_on_rpc_failure(retry_times=3)
     @check_connect
     def search(self, collection_name, dsl, partition_names=None, fields=None, timeout=None, **kwargs):
         """
@@ -973,9 +998,10 @@ class Milvus:
             BaseException: If the return result from server is not ok
         """
         with self._connection() as handler:
-            kwargs["_deploy_mode"] = self._deploy_mode
+            kwargs["_deploy_mode"] = handler.get_deploy_mode()
             return handler.search(collection_name, dsl, partition_names, fields, timeout=timeout, **kwargs)
 
+    @retry_on_rpc_failure(retry_times=3)
     @check_connect
     def search_with_expression(self, collection_name, data, anns_field, param, limit, expression=None, partition_names=None,
                                output_fields=None, timeout=None, **kwargs):
@@ -1020,44 +1046,52 @@ class Milvus:
             BaseException: If the return result from server is not ok
         """
         with self._connection() as handler:
-            kwargs["_deploy_mode"] = self._deploy_mode
+            kwargs["_deploy_mode"] = handler.get_deploy_mode()
             return handler.search_with_expression(collection_name, data, anns_field, param, limit, expression, partition_names, output_fields, timeout, **kwargs)
 
+    @retry_on_rpc_failure(retry_times=3)
     @check_connect
     def load_collection_progress(self, collection_name, timeout=None):
         with self._connection() as handler:
             return handler.load_collection_progress(collection_name, timeout=timeout)
 
+    @retry_on_rpc_failure(retry_times=3)
     @check_connect
     def load_partitions_progress(self, collection_name, partition_names, timeout=None):
         with self._connection() as handler:
             return handler.load_partitions_progress(collection_name, partition_names, timeout=timeout)
 
+    @retry_on_rpc_failure(retry_times=3)
     @check_connect
     def wait_for_loading_collection_complete(self, collection_name, timeout=None):
         with self._connection() as handler:
             return handler.wait_for_loading_collection(collection_name, timeout=timeout)
 
+    @retry_on_rpc_failure(retry_times=3)
     @check_connect
     def wait_for_loading_partitions_complete(self, collection_name, partition_names, timeout=None):
         with self._connection() as handler:
             return handler.wait_for_loading_partitions(collection_name, partition_names, timeout=timeout)
 
+    @retry_on_rpc_failure(retry_times=3)
     @check_connect
     def get_index_build_progress(self, collection_name, index_name, timeout=None):
         with self._connection() as handler:
             return handler.get_index_build_progress(collection_name, index_name, timeout=timeout)
 
+    @retry_on_rpc_failure(retry_times=3)
     @check_connect
     def wait_for_creating_index(self, collection_name, index_name, timeout=None):
         with self._connection() as handler:
             return handler.wait_for_creating_index(collection_name, index_name, timeout=timeout)
 
+    @retry_on_rpc_failure(retry_times=3)
     @check_connect
     def dummy(self, request_type, timeout=None):
         with self._connection() as handler:
             return handler.dummy(request_type, timeout=timeout)
 
+    @retry_on_rpc_failure(retry_times=3)
     @check_connect
     def get(self, collection_name, ids, output_fields=None, partition_names=None, timeout=None):
         """
@@ -1091,6 +1125,7 @@ class Milvus:
         with self._connection() as handler:
             return handler.get(collection_name, ids, output_fields, partition_names, timeout=timeout)
 
+    @retry_on_rpc_failure(retry_times=3)
     @check_connect
     def query(self, collection_name, expr, output_fields=None, partition_names=None, timeout=None):
         """
