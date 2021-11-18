@@ -326,9 +326,15 @@ class Partition:
         conn = self._get_connection()
         res = conn.delete(collection_name=self._collection.name, expr=expr,
                           partition_name=self._partition_name, timeout=timeout, **kwargs)
+
         if kwargs.get("_async", False):
-            return MutationFuture(res)
-        return MutationResult(res)
+            f = MutationFuture(res)
+            f._f.add_callback(self._collection._callback_on_mutation_result)
+            return f
+
+        m = MutationResult(res)
+        self._collection._callback_on_mutation_result(m)
+        return m 
 
     def search(self, data, anns_field, param, limit, expr=None, output_fields=None, timeout=None, round_decimal=-1,
                **kwargs):
