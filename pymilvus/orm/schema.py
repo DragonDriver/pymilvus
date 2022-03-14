@@ -201,7 +201,7 @@ class FieldSchema:
 
     def _parse_type_params(self):
         # update self._type_params according to self._kwargs
-        if self._dtype not in (DataType.BINARY_VECTOR, DataType.FLOAT_VECTOR):
+        if self._dtype not in (DataType.BINARY_VECTOR, DataType.FLOAT_VECTOR, DataType.STRING, DataType.VARCHAR,):
             return
         if not self._kwargs:
             return
