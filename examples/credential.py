@@ -3,6 +3,7 @@ from pymilvus import utility, connections
 _COLLECTION = "demo"
 _HOST = '127.0.0.1'
 _PORT = '19530'
+_ROOT = "root"
 _CONNECTION_NAME = "default"
 _ANOTHER_CONNECTION_NAME = "another_conn"
 _USER = "user"
@@ -10,6 +11,13 @@ _PASSWORD = "password"
 _ANOTHER_USER = "another_user"
 _ANOTHER_PASSWORD = "another_password"
 _NEW_PASSWORD = "new_password"
+
+# create credential.
+connections.connect(alias=_ROOT,
+                    host=_HOST,
+                    port=_PORT,
+                    )
+utility.create_credential(_USER, _PASSWORD, using=_ROOT)
 
 # connect to Milvus.
 connections.connect(alias=_CONNECTION_NAME,
