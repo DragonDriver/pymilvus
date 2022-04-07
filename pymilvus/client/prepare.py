@@ -875,7 +875,7 @@ class Prepare:
     def create_credential_request(cls, user, password):
         if not isinstance(user, str) or not isinstance(password, str):
             raise ParamError(f"invalid user {user} or password {password}")
-        return milvus_types.CreateCredentialRequest(username=user, password=base64.b64encode(password))
+        return milvus_types.CreateCredentialRequest(username=user, password=base64.b64encode(password.encode('utf-8')))
 
     @classmethod
     def delete_credential_request(cls, user):

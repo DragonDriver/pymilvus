@@ -17,6 +17,7 @@ connections.connect(alias=_ROOT,
                     host=_HOST,
                     port=_PORT,
                     )
+users = utility.list_cred_users(using=_ROOT)
 utility.create_credential(_USER, _PASSWORD, using=_ROOT)
 
 # connect to Milvus.
@@ -36,7 +37,7 @@ print(f"users in Milvus: {users}")
 utility.create_credential(_ANOTHER_USER, _ANOTHER_PASSWORD, using=_CONNECTION_NAME)
 
 # update credential.
-utility.create_credential(_ANOTHER_USER, _NEW_PASSWORD, using=_CONNECTION_NAME)
+utility.update_credential(_ANOTHER_USER, _NEW_PASSWORD, using=_CONNECTION_NAME)
 
 # establish a new connection using the created credential.
 connections.connect(alias=_ANOTHER_CONNECTION_NAME,
@@ -54,6 +55,7 @@ print(f"{_ANOTHER_USER} in users: {_ANOTHER_USER in users}")
 
 # delete credential.
 utility.delete_credential(_ANOTHER_USER, using=_CONNECTION_NAME)
-users = utility.list_cred_users(using=_ANOTHER_CONNECTION_NAME)
+users = utility.list_cred_users(using=_CONNECTION_NAME)
 print(f"users in Milvus: {users}")
 print(f"{_ANOTHER_USER} in users: {_ANOTHER_USER in users}")
+utility.delete_credential(_USER, using=_CONNECTION_NAME)

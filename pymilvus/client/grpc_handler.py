@@ -105,7 +105,7 @@ class GrpcHandler:
 
     def _setup_grpc_channel(self):
         """ Create a ddl grpc channel """
-        if self._channel is not None:
+        if self._channel is None:
             if not self._secure:
                 self._channel = grpc.insecure_channel(
                     self._uri,
@@ -129,7 +129,7 @@ class GrpcHandler:
         self._final_channel = self._channel
         if self._user and self._password:
             key = "authorization"
-            value = base64.b64encode(f"{self._user}:{self._password}")
+            value = base64.b64encode(f"{self._user}:{self._password}".encode("utf-8"))
             user_password_interceptor = interceptor.header_adder_interceptor(key, value)
             self._final_channel = grpc.intercept_channel(self._channel, user_password_interceptor)
         self._stub = milvus_pb2_grpc.MilvusServiceStub(self._final_channel)
