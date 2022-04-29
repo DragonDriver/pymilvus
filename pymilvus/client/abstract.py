@@ -4,6 +4,7 @@ from .types import DataType
 from .constants import DEFAULT_CONSISTENCY_LEVEL
 from ..grpc_gen import schema_pb2
 from ..exceptions import MilvusException
+from .configs import DefaultConfigs
 
 
 class LoopBase(object):
@@ -85,7 +86,7 @@ class FieldSchema:
                 self.params[type_param.key] = json.loads(type_param.value)
             else:
                 self.params[type_param.key] = type_param.value
-                if "dim" == type_param.key:
+                if type_param.key in ["dim", DefaultConfigs.MaxVarCharLengthKey]:
                     self.params[type_param.key] = int(type_param.value)
 
         index_dict = dict()
